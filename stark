@@ -1,0 +1,70 @@
+WITH user_summary AS (
+    SELECT user_address,
+    COUNT(*) AS transaction_count,
+    MIN(block_time) AS initial_block_time,
+    MAX(block_time) AS last_block_time,
+    DATE_DIFF('day', MIN(block_time), NOW()) AS lz_age_days,
+    COUNT(DISTINCT source_chain_id) AS active_source_chain_count,
+    COUNT(DISTINCT destination_chain_id) AS active_destination_chain_count,
+    COUNT(DISTINCT transaction_contract) AS active_transaction_contract_count,
+    COUNT(DISTINCT DATE_TRUNC('day', block_time)) AS active_days_count,
+    COUNT(DISTINCT DATE_TRUNC('week', block_time)) AS active_weeks_count,
+    COUNT(DISTINCT DATE_TRUNC('month', block_time)) AS active_months_count,
+    COALESCE(SUM(amount_usd), 0) AS amount_usd
+    FROM layerzero.send
+    GROUP BY user_address
+),
+user_summary_with_rank AS (
+    SELECT *,
+    (
+    active_source_chain_count +
+    IF(active_destination_chain_count >= 2, 1, 0) +
+    IF(active_destination_chain_count >= 5, 1, 0) +
+    IF(active_destination_chain_count >= 10, 1, 0) +
+    IF(active_months_count >= 2, 1, 0) +
+    IF(active_months_count >= 6, 1, 0) +
+    IF(active_months_count >= 9, 1, 0) +
+    IF(active_months_count >= 12, 1, 0) +
+    IF(active_weeks_count >= 10, 1, 0) +
+    IF(active_weeks_count >= 20, 1, 0) +
+    IF(active_weeks_count >= 50, 1, 0) +
+    IF(active_weeks_count >= 100, 1, 0) +
+    IF(active_days_count >= 50, 1, 0) +
+    IF(active_days_count >= 100, 1, 0) +
+    IF(active_days_count >= 200, 1, 0) +
+    IF(active_days_count >= 500, 1, 0) +
+    IF(lz_age_days >= 100, 1, 0) +
+    IF(lz_age_days >= 200, 1, 0) +
+    IF(lz_age_days >= 500, 1, 0) +
+    IF(transaction_count >= 5, 1, 0) +
+    IF(transaction_count >= 10, 1, 0) +
+    IF(transaction_count >= 25, 1, 0) +
+    IF(transaction_count >= 50, 1, 0) +
+    IF(transaction_count >= 100, 1, 0) +
+    IF(active_transaction_contract_count >= 5, 1, 0) +
+    IF(active_transaction_contract_count >= 10, 1, 0) +
+    IF(active_transaction_contract_count >= 25, 1, 0) +
+    IF(active_transaction_contract_count >= 50, 1, 0) +
+    IF(active_transaction_contract_count >= 100, 1, 0) +
+    IF(amount_usd > 0, 1, 0) +
+    IF(amount_usd > 1000, 1, 0) +
+    IF(amount_usd > 10000, 1, 0) +
+    IF(amount_usd > 50000, 1, 0) +
+    IF(amount_usd > 250000, 1, 0) +
+    IF(amount_usd > 500000, 1, 0) +
+    IF(amount_usd > 1000000, 1, 0)
+    ) AS rank_score
+    FROM user_summary
+)
+SELECT
+    ROW_NUMBER() OVER (ORDER BY rank_score DESC, amount_usd DESC, transaction_count DESC) AS rk,
+    user_address AS ua,
+    rank_score AS rs,
+    transaction_count AS tc,
+    ROUND(amount_usd, 2) AS amt,
+    CAST(active_source_chain_count AS VARCHAR) || ' / ' || CAST(active_destination_chain_count AS VARCHAR) || ' / ' || CAST(active_transaction_contract_count AS VARCHAR) AS cc,
+    CAST(active_days_count AS VARCHAR) || ' / ' || CAST(active_weeks_count AS VARCHAR) || ' / ' || CAST(active_months_count AS VARCHAR) AS dwm,
+    lz_age_days AS lzd,
+    initial_block_time AS ibt
+FROM user_summary_with_rank
+ORDER BY rank_score DESC, amount_usd DESC, transaction_count DESC;
